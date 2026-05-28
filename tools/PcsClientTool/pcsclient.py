@@ -67,6 +67,14 @@ def main():
 
 class Utils:
     @staticmethod
+    def parse_json_response(data, response_name):
+        try:
+            return json.loads(data)
+        except json.JSONDecodeError as error:
+            print(f"Failed to parse {response_name} response as JSON: {error}")
+            return None
+
+    @staticmethod
     def check_expire_hours(value):
         try:
             int_value = int(value)
@@ -345,14 +353,20 @@ class CollateralFetcher:
                 else:
                     tcbinfo_key = f'tcbinfo{key_suffix}'
 
-                tcbinfoJson[tcbinfo_key] = json.loads(sgx_tcbinfo[0])
+                sgx_tcbinfo_json = Utils.parse_json_response(sgx_tcbinfo[0], "SGX TCB info")
+                if sgx_tcbinfo_json is None:
+                    return False
+                tcbinfoJson[tcbinfo_key] = sgx_tcbinfo_json
 
                 # TDX tcbinfo is optional
                 if self.ApiVersion >= 4:
                     tdx_tcbinfo = self.pcsclient.get_tcb_info(fmspc, 'tdx', update, 'ascii')
                     if tdx_tcbinfo is not None:
                         tdx_tcbinfo_key = f'tdx_tcbinfo{key_suffix}'
-                        tcbinfoJson[tdx_tcbinfo_key] = json.loads(tdx_tcbinfo[0])
+                        tdx_tcbinfo_json = Utils.parse_json_response(tdx_tcbinfo[0], "TDX TCB info")
+                        if tdx_tcbinfo_json is None:
+                            return False
+                        tcbinfoJson[tdx_tcbinfo_key] = tdx_tcbinfo_json
                 # End loop
 
             self.output_json["collaterals"]["tcbinfos"].append(tcbinfoJson)
@@ -370,7 +384,10 @@ class CollateralFetcher:
                     return False
             else:
                 key_suffix = '_early' if update == 'early' else ''
-                self.output_json["collaterals"][f"{identity_type}identity{key_suffix}"] = identity[0]
+                identity_json = Utils.parse_json_response(identity[0], f"{identity_type.upper()} identity")
+                if identity_json is None:
+                    return False
+                self.output_json["collaterals"][f"{identity_type}identity{key_suffix}"] = identity_json
                 if identity_type == 'qe':
                     self.output_json["collaterals"]["certificates"][PCS.HDR_Enclave_Identity_Issuer_Chain] = identity[1]
         return True
@@ -456,7 +473,10 @@ class CacheCreator:
             print(f"Failed to get TCB info for fmspc: {fmspc}")
             return False
 
-        tcbcomponent = self._decompose_cpusvn_components(platform["cpu_svn"], json.loads(sgx_tcbinfo[0])["tcbInfo"]["tcbType"])
+        sgx_tcbinfo_json = Utils.parse_json_response(sgx_tcbinfo[0], "SGX TCB info")
+        if sgx_tcbinfo_json is None:
+            return False
+        tcbcomponent = self._decompose_cpusvn_components(platform["cpu_svn"], sgx_tcbinfo_json["tcbInfo"]["tcbType"])
 
         # Check if 'pckid_filename' is in the platform dictionary
         if 'pckid_filename' in platform:

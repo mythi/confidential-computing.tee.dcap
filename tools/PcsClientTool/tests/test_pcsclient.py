@@ -8,11 +8,21 @@
 
 import argparse
 import unittest
-from unittest.mock import patch
-from pcsclient import Utils
+from unittest.mock import Mock, patch
+from pcsclient import CollateralFetcher, Utils
 
 
 class TestUtils(unittest.TestCase):
+    def test_parse_json_response_reports_invalid_json(self):
+        with patch("builtins.print") as mock_print:
+            result = Utils.parse_json_response("Service unavailable", "QE identity")
+
+        self.assertIsNone(result)
+        self.assertIn(
+            "Failed to parse QE identity response as JSON",
+            mock_print.call_args.args[0],
+        )
+
     def test_check_expire_hours_accepts_valid_values(self):
         self.assertEqual(Utils.check_expire_hours("0"), 0)
         self.assertEqual(Utils.check_expire_hours("24"), 24)
@@ -84,6 +94,52 @@ class TestUtils(unittest.TestCase):
     def test_get_api_version_from_url_extracts_version(self):
         self.assertEqual(Utils.get_api_version_from_url("https://example.com/sgx/certification/v4/"), 4)
         self.assertEqual(Utils.get_api_version_from_url("https://example.com/sgx/certification/v12/"), 12)
+
+
+class TestCollateralFetcher(unittest.TestCase):
+    def test_fetch_identity_stores_valid_json(self):
+        fetcher = CollateralFetcher.__new__(CollateralFetcher)
+        fetcher.tcb_update_type = "standard"
+        fetcher.pcsclient = Mock()
+        fetcher.pcsclient.get_enclave_identity.return_value = (
+            '{"enclaveIdentity": {"id": "QE"}}',
+            "issuer chain",
+        )
+        fetcher.output_json = {
+            "collaterals": {
+                "qeidentity": "",
+                "certificates": {},
+            }
+        }
+
+        result = fetcher._fetch_identity("qe")
+
+        self.assertTrue(result)
+        self.assertEqual(
+            fetcher.output_json["collaterals"]["qeidentity"],
+            {"enclaveIdentity": {"id": "QE"}},
+        )
+
+    def test_fetch_identity_returns_false_for_invalid_json(self):
+        fetcher = CollateralFetcher.__new__(CollateralFetcher)
+        fetcher.tcb_update_type = "standard"
+        fetcher.pcsclient = Mock()
+        fetcher.pcsclient.get_enclave_identity.return_value = (
+            "Service unavailable",
+            "issuer chain",
+        )
+        fetcher.output_json = {
+            "collaterals": {
+                "qeidentity": "",
+                "certificates": {},
+            }
+        }
+
+        with patch("builtins.print"):
+            result = fetcher._fetch_identity("qe")
+
+        self.assertFalse(result)
+        self.assertEqual(fetcher.output_json["collaterals"]["qeidentity"], "")
 
 
 if __name__ == "__main__":
